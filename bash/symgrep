@@ -1,0 +1,172 @@
+#!/usr/bin/env bash
+
+PROGRAM=$(basename "$0")
+CACHE_DIR="$(realpath ~)/.cache/$PROGRAM"
+
+show_help()
+{
+	cat << EOF
+usage: $PROGRAM [--clean] [-p PATH] [-e] SYMBOL [[-e] SYMBOL...]
+       $PROGRAM -h|--help
+
+Search for all SYMBOLs in a directory (/usr by default), recursively, and present what
+object file they are in.
+
+Options:
+  -e, --regex		treat SYMBOL as a regular expression and not a whole word
+  -p, --path		set root search path for SYMBOL, the default is '\usr'
+      --clean		delete all caches of $PROGRAM, start a clean search
+  -h, --help		display this help text and exit
+
+EOF
+}
+
+error_exit()
+{
+	local error_message="$1"
+
+	if [[ -n ${error_message} ]]; then
+		echo "Error: ${error_message}"
+	fi
+
+	show_help
+	exit 1
+}
+
+parse_args()
+{
+	WHOLE_SYMBOLS=()
+	REGEX_SYMBOLS=()
+	local passed_symbols=false
+
+	while [ $# -gt 0 ]; do
+		case "$1" in
+		-e|--regex)
+			# Match symbol with regular expression
+			REGEX_SYMBOLS+=("$2")
+			passed_symbols=true
+			shift
+			shift
+			;;
+		-p|--path)
+			SEARCH_PATH="$2"
+			shift
+			shift
+			;;
+		--clean)
+			rm -r "${CACHE_DIR}"
+			shift
+			;;
+		-h|--help)
+			# Show help
+			show_help
+			exit 0
+			;;
+		--*|-*)
+			# Unsupported flag
+			error_exit "Unknown option $1"
+			;;
+		*)
+			# Positional arguments - Match whole symbol
+			WHOLE_SYMBOLS+=("$1")
+			passed_symbols=true
+			shift
+			;;
+		esac
+	done
+
+	if [ "$passed_symbols" = false ]; then
+		error_exit "Must have at least one symbol"
+	fi
+
+	SEARCH_PATH="$(realpath "${SEARCH_PATH:-/usr}")"
+	if [[ ! -d "${SEARCH_PATH}" ]]; then
+		error_exit "${SEARCH_PATH} directory no found."
+	fi
+}
+
+####################################
+# Find all symbols in the search path and save them in a cache file.
+# Globals:
+#   SEARCH_PATH - double quoted string - Absolute Path to search symbols in.
+#   SEARCH_PATH_HASH - double quoted string - First 32 bytes of the hash of
+#     'SEARCH_PATH', which is also the name of this path's cache file.
+#   CACHE_FILE_PATH - double quoted string - Absolute path to the cache file
+#     of the current search path. This file is also created and filled with
+#     the symbols cache.
+# Arguments:
+#   None
+# Returns:
+#   None
+####################################
+retrieve_symbols()
+{
+	SEARCH_PATH_HASH="$(echo -n ${SEARCH_PATH} | shasum | cut -c-32)"
+	CACHE_FILE_PATH="${CACHE_DIR}/${SEARCH_PATH_HASH}"
+
+	mkdir -p "$CACHE_DIR"
+
+	if [[ -e "${CACHE_FILE_PATH}" && "${SEARCH_PATH}" -ot "${CACHE_FILE_PATH}" ]]; then
+		return
+	fi
+
+	# Create caches on first run if or the searched directory was last modified
+	# after the cache file
+	: > "${CACHE_FILE_PATH}"
+	find "${SEARCH_PATH}" \( -iname \*.a -o -iname \*.o \) | xargs -I {} \
+		nm -A --defined-only {} 2> /dev/null >> "${CACHE_FILE_PATH}"
+}
+
+####################################
+# Match defined symbols from a symbols list string, according
+# to a regex (passed as a printf format)
+# Globals:
+#   CACHE_FILE_PATH - double-quoted string - Path to the cache file, containing
+#   the symbols output for tor the current search, to be used as the search input.
+# Arguments:
+#   printf_format - single-quoted string - a printf format of the desired
+#     symbol regex, with the symbol itself represented with the '%s' placeholder.
+#     For example: '\\b%s\\b' for a whole word match.
+#   searched_symbols_list - string array - array of symbols to search from
+#     OBJECT_SYMBOLS.
+# Returns:
+#   None
+####################################
+match_symbol_group()
+{
+	local printf_format="$1"
+	shift 1
+	local searched_symbols_list=("$@")
+
+	local grep_symbols=""
+
+	if [ ${#searched_symbols_list[@]} -eq 0 ]; then
+		echo 'Received no symbol to match'
+		return
+	fi
+
+	if [[ ! "${printf_format}" =~ '%s' ]]; then
+		echo 'printf string must contain %s'
+		return
+	fi
+
+	# Convert all symbols to a grep arg string, with the proper regex format
+	for symbol in "${searched_symbols_list[@]}"; do
+		printf -v grep_symbols "%s -e \"${printf_format}\\S*\$\" " "${grep_symbols}" "${symbol}"
+	done
+
+	eval "grep ${grep_symbols} ${CACHE_FILE_PATH}"
+}
+
+main()
+{
+	parse_args "$@"
+	retrieve_symbols
+
+	# Normal regex
+	match_symbol_group '%s' "${REGEX_SYMBOLS[@]}"
+	# Whole words
+	match_symbol_group '\\b%s\\b' "${WHOLE_SYMBOLS[@]}"
+}
+
+main "$@"
