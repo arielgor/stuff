@@ -5,8 +5,20 @@ CACHE_DIR="$(realpath ~)/.cache/$PROGRAM"
 
 show_help()
 {
-	echo "usage: $PROGRAM [--clean] [-p PATH] [-e] SYMBOL [[-e] SYMBOL...]"
-	echo "       $PROGRAM -h|--help"
+	cat << EOF
+usage: $PROGRAM [--clean] [-p PATH] [-e] SYMBOL [[-e] SYMBOL...]
+       $PROGRAM -h|--help
+
+Search for all SYMBOLs in a directory (/usr by default), recursively, and present what
+object file they are in.
+
+Options:
+  -e, --regex		treat SYMBOL as a regular expression and not a whole word
+  -p, --path		set root search path for SYMBOL, the default is '\usr'
+      --clean		delete all caches of $PROGRAM, start a clean search
+  -h, --help		display this help text and exit
+
+EOF
 }
 
 error_exit()
