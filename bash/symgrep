@@ -11,6 +11,10 @@ init_symbol_group()
 	local symbol_group_name="$1"
 	local symbol_group_format="$2"
 
+	if [[ ! "${symbol_group_format}" =~ '%s' ]]; then
+		error_exit 'group format must contain %s'
+	fi
+
 	SYMBOL_GROUPS["$symbol_group_name"]=
 	SYMBOL_GROUP_FORMATS[$symbol_group_name]="$symbol_group_format"
 }
