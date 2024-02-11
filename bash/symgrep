@@ -1,7 +1,62 @@
 #!/usr/bin/env bash
 
-PROGRAM=$(basename "$0")
-CACHE_DIR="$(realpath ~)/.cache/$PROGRAM"
+readonly PROGRAM=$(basename "$0")
+readonly CACHE_DIR="$(realpath ~)/.cache/$PROGRAM"
+
+declare -A SYMBOL_GROUPS
+declare -A SYMBOL_GROUP_FORMATS
+
+init_symbol_group()
+{
+	local symbol_group_name="$1"
+	local symbol_group_format="$2"
+
+	SYMBOL_GROUPS["$symbol_group_name"]=
+	SYMBOL_GROUP_FORMATS[$symbol_group_name]="$symbol_group_format"
+}
+
+add_symbol_to_group()
+{
+	local symbol_group_name="$1"
+	local new_symbol="$2"
+
+	if ! is_symbol_group_exist "$symbol_group_name"; then
+		error_exit "Symbol group does not exist"
+	fi
+
+	if [[ -z "${SYMBOL_GROUPS[$symbol_group_name]}"  ]]; then
+		SYMBOL_GROUPS["$symbol_group_name"]+="$new_symbol"
+	else
+		SYMBOL_GROUPS["$symbol_group_name"]+=" $new_symbol"
+	fi
+}
+
+is_symbol_group_exist()
+{
+	local symbol_group_name="$1"
+
+	if [[ -n "${SYMBOL_GROUP_FORMATS[$symbol_group_name]}" ]]; then
+		true
+		return
+	fi
+
+	false
+	return
+}
+
+is_symbol_group_empty()
+{
+		local symbol_group_name="$1"
+
+	if [[ -z "${SYMBOL_GROUPS[$symbol_group_name]}" ]]; then
+		true
+		return
+	fi
+
+	false
+	return
+
+}
 
 show_help()
 {
@@ -35,15 +90,16 @@ error_exit()
 
 parse_args()
 {
-	WHOLE_SYMBOLS=()
-	REGEX_SYMBOLS=()
 	local passed_symbols=false
+
+	init_symbol_group NORMAL_REGEX '%s'
+	init_symbol_group WHOLE_WORDS '\\b%s\\b'
 
 	while [ $# -gt 0 ]; do
 		case "$1" in
 		-e|--regex)
 			# Match symbol with regular expression
-			REGEX_SYMBOLS+=("$2")
+			add_symbol_to_group NORMAL_REGEX "$2"
 			passed_symbols=true
 			shift
 			shift
@@ -68,7 +124,7 @@ parse_args()
 			;;
 		*)
 			# Positional arguments - Match whole symbol
-			WHOLE_SYMBOLS+=("$1")
+			add_symbol_to_group WHOLE_WORDS "$1"
 			passed_symbols=true
 			shift
 			;;
@@ -132,7 +188,7 @@ retrieve_symbols()
 # Returns:
 #   None
 ####################################
-match_symbol_group()
+match_symbols()
 {
 	local printf_format="$1"
 	shift 1
@@ -163,10 +219,12 @@ main()
 	parse_args "$@"
 	retrieve_symbols
 
-	# Normal regex
-	match_symbol_group '%s' "${REGEX_SYMBOLS[@]}"
-	# Whole words
-	match_symbol_group '\\b%s\\b' "${WHOLE_SYMBOLS[@]}"
+	for symbol_group in "${!SYMBOL_GROUPS[@]}"; do
+		if ! is_symbol_group_empty "${symbol_group}"; then
+			# SYMBOL_GROUPS is intentionally unquoted - passed as an array
+			match_symbols "${SYMBOL_GROUP_FORMATS[${symbol_group}]}" ${SYMBOL_GROUPS[${symbol_group}]}
+		fi
+	done
 }
 
 main "$@"
